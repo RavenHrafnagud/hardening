@@ -2,7 +2,7 @@ import { FormEvent, useState } from 'react'
 import type { EquipmentFormData } from '../../domain/hardening'
 
 interface EquipmentFormProps {
-  onSubmit: (formData: EquipmentFormData) => void
+  onSubmit: (formData: EquipmentFormData) => void | Promise<void>
 }
 
 const initialFormData: EquipmentFormData = {
@@ -20,9 +20,9 @@ export function EquipmentForm({ onSubmit }: EquipmentFormProps) {
     setFormData((current) => ({ ...current, [field]: value }))
   }
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    onSubmit(formData)
+    await onSubmit(formData)
     setFormData(initialFormData)
   }
 

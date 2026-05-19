@@ -1,4 +1,5 @@
-import type { Equipment, UserRole } from '../../domain/hardening'
+import type { UserRole } from '../../../identity-access/domain/accessControl'
+import type { Equipment } from '../../domain/hardening'
 
 interface EquipmentTableProps {
   equipments: Equipment[]

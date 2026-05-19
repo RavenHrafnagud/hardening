@@ -1,14 +1,4 @@
-export type UserRole = 'admin' | 'standard'
-
 export type EquipmentStatus = 'hardened' | 'assigned'
-
-export interface Account {
-  id: string
-  username: string
-  password: string
-  role: UserRole
-  displayName: string
-}
 
 export interface AssignedUser {
   id: string

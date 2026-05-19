@@ -1,27 +1,32 @@
 import { useMemo, useState } from 'react'
-import type { Account, HardeningDatabase } from '../../domain/hardening'
+import type {
+  AssignedUserFormData,
+  EquipmentFormData,
+  HardeningDatabase,
+} from '../domain/hardening'
+import type { Account } from '../../identity-access/domain/accessControl'
 import {
-  assignUserToEquipment,
-  createEquipment,
   filterEquipments,
   getHardeningMetrics,
-} from '../../application/equipmentService'
-import { EquipmentForm } from '../components/EquipmentForm'
-import { EquipmentTable } from '../components/EquipmentTable'
-import { MetricCard } from '../components/MetricCard'
-import { UserAssignmentForm } from '../components/UserAssignmentForm'
+} from '../application/hardeningDashboard'
+import { EquipmentForm } from './components/EquipmentForm'
+import { EquipmentTable } from './components/EquipmentTable'
+import { MetricCard } from './components/MetricCard'
+import { UserAssignmentForm } from './components/UserAssignmentForm'
 
 interface DashboardScreenProps {
   account: Account
   database: HardeningDatabase
-  onDatabaseChange: (database: HardeningDatabase) => void
+  onAssignUser: (formData: AssignedUserFormData) => Promise<void>
+  onCreateEquipment: (formData: EquipmentFormData) => Promise<void>
   onLogout: () => void
 }
 
 export function DashboardScreen({
   account,
   database,
-  onDatabaseChange,
+  onAssignUser,
+  onCreateEquipment,
   onLogout,
 }: DashboardScreenProps) {
   const [query, setQuery] = useState('')
@@ -127,15 +132,13 @@ export function DashboardScreen({
         <aside className="workspace-side">
           {isAdmin && (
             <EquipmentForm
-              onSubmit={(formData) =>
-                onDatabaseChange(createEquipment(database, formData))
-              }
+              onSubmit={onCreateEquipment}
             />
           )}
 
           <UserAssignmentForm
             equipments={assignableEquipments}
-            onSubmit={(formData) => {
+            onSubmit={async (formData) => {
               const selectedEquipment = database.equipments.find(
                 (equipment) => equipment.id === formData.equipmentId,
               )
@@ -147,7 +150,7 @@ export function DashboardScreen({
                 return
               }
 
-              onDatabaseChange(assignUserToEquipment(database, formData))
+              await onAssignUser(formData)
             }}
           />
         </aside>

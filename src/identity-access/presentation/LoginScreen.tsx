@@ -1,27 +1,31 @@
 import { FormEvent, useState } from 'react'
-import type { Account } from '../../domain/hardening'
-import { authenticate } from '../../application/auth'
-
 interface LoginScreenProps {
-  onLogin: (account: Account) => void
+  error: string
+  onLogin: (username: string, password: string) => Promise<void>
 }
 
-export function LoginScreen({ onLogin }: LoginScreenProps) {
+export function LoginScreen({ error, onLogin }: LoginScreenProps) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [localError, setLocalError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const account = authenticate(username, password)
+    setIsSubmitting(true)
 
-    if (!account) {
-      setError('Credenciales invalidas')
-      return
+    try {
+      await onLogin(username, password)
+      setLocalError('')
+    } catch (loginError) {
+      setLocalError(
+        loginError instanceof Error
+          ? loginError.message
+          : 'Credenciales invalidas',
+      )
+    } finally {
+      setIsSubmitting(false)
     }
-
-    setError('')
-    onLogin(account)
   }
 
   return (
@@ -55,9 +59,13 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
             />
           </label>
 
-          {error && <p className="form-error">{error}</p>}
+          {(localError || error) && (
+            <p className="form-error">{localError || error}</p>
+          )}
 
-          <button type="submit">Ingresar</button>
+          <button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Ingresando...' : 'Ingresar'}
+          </button>
         </form>
       </section>
     </main>

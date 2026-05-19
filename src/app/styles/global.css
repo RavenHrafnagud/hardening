@@ -128,6 +128,13 @@ code {
     var(--bg);
 }
 
+.loading-screen {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
 .login-card {
   width: min(100%, 410px);
   display: grid;

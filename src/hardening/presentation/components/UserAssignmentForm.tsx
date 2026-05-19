@@ -6,7 +6,7 @@ import type {
 
 interface UserAssignmentFormProps {
   equipments: Equipment[]
-  onSubmit: (formData: AssignedUserFormData) => void
+  onSubmit: (formData: AssignedUserFormData) => void | Promise<void>
 }
 
 const createInitialFormData = (
@@ -38,13 +38,13 @@ export function UserAssignmentForm({
     setFormData((current) => ({ ...current, [field]: value }))
   }
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!selectedEquipmentId) {
       return
     }
 
-    onSubmit({ ...formData, equipmentId: selectedEquipmentId })
+    await onSubmit({ ...formData, equipmentId: selectedEquipmentId })
     setFormData(createInitialFormData(equipments))
   }
 
