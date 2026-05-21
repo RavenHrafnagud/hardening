@@ -4,9 +4,15 @@ import type {
   EquipmentFormData,
   HardeningDatabase,
 } from '../hardening/domain/hardening'
-import type { AuthSession } from '../identity-access/domain/accessControl'
+import type {
+  Account,
+  AuthSession,
+  CreateUserFormData,
+  UpdateAccountCredentialsFormData,
+} from '../identity-access/domain/accessControl'
 import { ApiHardeningRepository } from '../hardening/infrastructure/hardeningApiClient'
 import { DashboardScreen } from '../hardening/presentation/DashboardScreen'
+import { AccessControlApiClient } from '../identity-access/infrastructure/accessControlApiClient'
 import { LoginScreen } from '../identity-access/presentation/LoginScreen'
 
 const SESSION_KEY = 'credismart-hardening-session'
@@ -27,14 +33,26 @@ const readStoredSession = () => {
 }
 
 function App() {
-  const repository = useMemo(() => new ApiHardeningRepository(), [])
+  const hardeningRepository = useMemo(() => new ApiHardeningRepository(), [])
+  const accessControlRepository = useMemo(() => new AccessControlApiClient(), [])
   const [database, setDatabase] = useState<HardeningDatabase | null>(null)
   const [session, setSession] = useState<AuthSession | null>(() =>
     readStoredSession(),
   )
+  const [accounts, setAccounts] = useState<Account[]>([])
   const [error, setError] = useState('')
   const account = session?.account ?? null
   const token = session?.token ?? ''
+  const isAdmin = account?.role === 'admin'
+
+  const persistSession = (nextSession: AuthSession | null) => {
+    if (!nextSession) {
+      window.sessionStorage.removeItem(SESSION_KEY)
+      return
+    }
+
+    window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(nextSession))
+  }
 
   useEffect(() => {
     if (!token) {
@@ -43,18 +61,51 @@ function App() {
 
     let isMounted = true
 
-    repository
-      .load(token)
-      .then((nextDatabase) => {
-        if (isMounted) {
-          setDatabase(nextDatabase)
-          setError('')
+    const loadData = async () => {
+      const nextDatabase = await hardeningRepository.load(token)
+
+      if (!isAdmin) {
+        return { nextDatabase, nextAccounts: [] as Account[], currentAccount: null }
+      }
+
+      const accountDirectory = await accessControlRepository.listAccounts(token)
+      return {
+        nextDatabase,
+        nextAccounts: accountDirectory.accounts,
+        currentAccount: accountDirectory.currentAccount,
+      }
+    }
+
+    loadData()
+      .then(({ nextDatabase, nextAccounts, currentAccount }) => {
+        if (!isMounted) {
+          return
+        }
+
+        setDatabase(nextDatabase)
+        setAccounts(nextAccounts)
+        setError('')
+
+        if (
+          currentAccount &&
+          session &&
+          (
+            currentAccount.id !== session.account.id ||
+            currentAccount.username !== session.account.username ||
+            currentAccount.role !== session.account.role ||
+            currentAccount.displayName !== session.account.displayName
+          )
+        ) {
+          const nextSession = { ...session, account: currentAccount }
+          setSession(nextSession)
+          persistSession(nextSession)
         }
       })
       .catch((loadError: unknown) => {
         if (isMounted) {
-          window.sessionStorage.removeItem(SESSION_KEY)
           setSession(null)
+          setAccounts([])
+          persistSession(null)
           setError(
             loadError instanceof Error
               ? loadError.message
@@ -66,19 +117,21 @@ function App() {
     return () => {
       isMounted = false
     }
-  }, [repository, token])
+  }, [accessControlRepository, hardeningRepository, isAdmin, session, token])
 
   const handleLogin = async (username: string, password: string) => {
-    const nextSession = await repository.login(username, password)
-    window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(nextSession))
+    const nextSession = await accessControlRepository.login(username, password)
+    persistSession(nextSession)
     setDatabase(null)
+    setAccounts([])
     setSession(nextSession)
   }
 
   const handleLogout = () => {
-    window.sessionStorage.removeItem(SESSION_KEY)
     setDatabase(null)
+    setAccounts([])
     setSession(null)
+    persistSession(null)
   }
 
   const handleCreateEquipment = async (formData: EquipmentFormData) => {
@@ -86,7 +139,7 @@ function App() {
       return
     }
 
-    setDatabase(await repository.createEquipment(token, formData))
+    setDatabase(await hardeningRepository.createEquipment(token, formData))
   }
 
   const handleAssignUser = async (formData: AssignedUserFormData) => {
@@ -94,7 +147,37 @@ function App() {
       return
     }
 
-    setDatabase(await repository.assignUser(token, formData))
+    setDatabase(await hardeningRepository.assignUser(token, formData))
+  }
+
+  const handleCreateUser = async (formData: CreateUserFormData) => {
+    if (!token) {
+      return
+    }
+
+    const directory = await accessControlRepository.createUser(token, formData)
+    setAccounts(directory.accounts)
+  }
+
+  const handleUpdateAccountCredentials = async (
+    formData: UpdateAccountCredentialsFormData,
+  ) => {
+    if (!token || !session) {
+      return
+    }
+
+    const directory = await accessControlRepository.updateAccountCredentials(
+      token,
+      formData,
+    )
+    const nextSession = {
+      ...session,
+      account: directory.currentAccount,
+    }
+
+    setAccounts(directory.accounts)
+    setSession(nextSession)
+    persistSession(nextSession)
   }
 
   if (!account) {
@@ -112,10 +195,13 @@ function App() {
   return (
     <DashboardScreen
       account={account}
+      accounts={accounts}
       database={database}
       onAssignUser={handleAssignUser}
       onCreateEquipment={handleCreateEquipment}
+      onCreateUser={handleCreateUser}
       onLogout={handleLogout}
+      onUpdateAccountCredentials={handleUpdateAccountCredentials}
     />
   )
 }

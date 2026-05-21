@@ -11,6 +11,9 @@ import type {
 } from '../../src/hardening/domain/hardening.js'
 import type {
   Account,
+  AccountDirectory,
+  CreateUserFormData,
+  UpdateAccountCredentialsFormData,
   UserRole,
 } from '../../src/identity-access/domain/accessControl.js'
 
@@ -48,6 +51,13 @@ interface AccountRow {
   password_salt: string
 }
 
+interface AccountIdentityRow {
+  id: string
+  username: string
+  role: UserRole
+  display_name: string
+}
+
 const dataDirectory = resolve(process.cwd(), 'data')
 const databasePath = resolve(dataDirectory, 'hardening.sqlite')
 const seedPath = resolve(
@@ -63,6 +73,8 @@ const now = () => new Date().toISOString()
 const readSeed = () =>
   JSON.parse(readFileSync(seedPath, 'utf8')) as SeedFile
 
+const normalizeUsername = (username: string) => username.trim().toLowerCase()
+
 const hashPassword = (password: string, salt = randomBytes(16).toString('hex')) => {
   const hash = pbkdf2Sync(password, salt, 120_000, 64, 'sha512').toString('hex')
   return { hash, salt }
@@ -77,12 +89,21 @@ const verifyPassword = (
   return timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(passwordHash, 'hex'))
 }
 
-const toAccount = (row: AccountRow): Account => ({
+const toAccount = (row: AccountIdentityRow): Account => ({
   id: row.id,
   username: row.username,
   role: row.role,
   displayName: row.display_name,
 })
+
+export class DatabaseOperationError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number,
+  ) {
+    super(message)
+  }
+}
 
 export class HardeningSqliteDatabase {
   private readonly db: DatabaseSync
@@ -105,7 +126,7 @@ export class HardeningSqliteDatabase {
          FROM accounts
          WHERE username = ?`,
       )
-      .get(username.trim().toLowerCase()) as AccountRow | undefined
+      .get(normalizeUsername(username)) as AccountRow | undefined
 
     if (!account || !verifyPassword(password, account.password_hash, account.password_salt)) {
       return null
@@ -136,6 +157,13 @@ export class HardeningSqliteDatabase {
       .get(token, now()) as AccountRow | undefined
 
     return row ? toAccount(row) : null
+  }
+
+  getAccountDirectory(currentAccountId: string): AccountDirectory {
+    return {
+      accounts: this.listAccounts(),
+      currentAccount: this.getAccountById(currentAccountId),
+    }
   }
 
   getDatabase(): HardeningDatabase {
@@ -196,6 +224,98 @@ export class HardeningSqliteDatabase {
     }
   }
 
+  createUser(formData: CreateUserFormData, currentAccountId: string) {
+    const username = normalizeUsername(formData.username)
+
+    if (!username) {
+      throw new DatabaseOperationError('El nombre de usuario es obligatorio.', 400)
+    }
+
+    if (!formData.password) {
+      throw new DatabaseOperationError('La contraseña es obligatoria.', 400)
+    }
+
+    const credentials = hashPassword(formData.password)
+
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO accounts (
+            id, username, password_hash, password_salt, role, display_name
+          )
+          VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          createId('acct'),
+          username,
+          credentials.hash,
+          credentials.salt,
+          'standard',
+          username,
+        )
+    } catch (error) {
+      throw this.toOperationError(error)
+    }
+
+    return this.getAccountDirectory(currentAccountId)
+  }
+
+  updateAccountCredentials(
+    formData: UpdateAccountCredentialsFormData,
+    currentAccountId: string,
+    currentToken: string,
+  ) {
+    const existingAccount = this.findAccountRowById(formData.accountId)
+    const username = normalizeUsername(formData.username)
+
+    if (!username) {
+      throw new DatabaseOperationError('El nombre de usuario es obligatorio.', 400)
+    }
+
+    if (!existingAccount) {
+      throw new DatabaseOperationError('La cuenta no existe.', 404)
+    }
+
+    const nextPassword = formData.password || null
+    const nextHash = nextPassword
+      ? hashPassword(nextPassword)
+      : {
+          hash: existingAccount.password_hash,
+          salt: existingAccount.password_salt,
+        }
+
+    try {
+      this.db.exec('BEGIN')
+      this.db
+        .prepare(
+          `UPDATE accounts
+           SET username = ?, password_hash = ?, password_salt = ?, display_name = ?
+           WHERE id = ?`,
+        )
+        .run(
+          username,
+          nextHash.hash,
+          nextHash.salt,
+          username,
+          formData.accountId,
+        )
+
+      this.db
+        .prepare(
+          `DELETE FROM sessions
+           WHERE account_id = ? AND token <> ?`,
+        )
+        .run(formData.accountId, currentToken)
+
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw this.toOperationError(error)
+    }
+
+    return this.getAccountDirectory(currentAccountId)
+  }
+
   createEquipment(formData: EquipmentFormData) {
     const timestamp = now()
 
@@ -227,7 +347,10 @@ export class HardeningSqliteDatabase {
       .get(formData.equipmentId) as { total: number } | undefined
 
     if (account.role === 'standard' && existingUsers?.total) {
-      throw new Error('El equipo ya tiene un usuario asignado.')
+      throw new DatabaseOperationError(
+        'El equipo ya tiene un usuario asignado.',
+        409,
+      )
     }
 
     const timestamp = now()
@@ -271,6 +394,67 @@ export class HardeningSqliteDatabase {
 
   get path() {
     return databasePath
+  }
+
+  private listAccounts() {
+    const rows = this.db
+      .prepare(
+        `SELECT id, username, role, display_name
+         FROM accounts
+         ORDER BY CASE WHEN role = 'admin' THEN 0 ELSE 1 END, username ASC`,
+      )
+      .all() as unknown as AccountIdentityRow[]
+
+    return rows.map(toAccount)
+  }
+
+  private getAccountById(accountId: string) {
+    const row = this.db
+      .prepare(
+        `SELECT id, username, role, display_name
+         FROM accounts
+         WHERE id = ?`,
+      )
+      .get(accountId) as AccountIdentityRow | undefined
+
+    if (!row) {
+      throw new DatabaseOperationError('La cuenta no existe.', 404)
+    }
+
+    return toAccount(row)
+  }
+
+  private findAccountRowById(accountId: string) {
+    return this.db
+      .prepare(
+        `SELECT id, username, role, display_name, password_hash, password_salt
+         FROM accounts
+         WHERE id = ?`,
+      )
+      .get(accountId) as AccountRow | undefined
+  }
+
+  private toOperationError(error: unknown) {
+    if (
+      error instanceof Error &&
+      error.message.includes('UNIQUE constraint failed: accounts.username')
+    ) {
+      return new DatabaseOperationError(
+        'Ese nombre de usuario ya existe.',
+        409,
+      )
+    }
+
+    if (error instanceof DatabaseOperationError) {
+      return error
+    }
+
+    return new DatabaseOperationError(
+      error instanceof Error
+        ? error.message
+        : 'No se pudo completar la operación.',
+      500,
+    )
   }
 
   private createSchema() {

@@ -182,6 +182,11 @@ code {
   font-weight: 700;
 }
 
+.form-success {
+  color: var(--green);
+  font-weight: 700;
+}
+
 .app-shell {
   width: min(1440px, 100%);
   min-height: 100svh;
@@ -296,6 +301,11 @@ code {
   padding: 18px;
 }
 
+.panel-note {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .toolbar {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(170px, 220px) auto;
@@ -304,6 +314,12 @@ code {
 }
 
 .form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.inline-field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -388,6 +404,55 @@ td span {
   margin-top: 8px;
 }
 
+.account-management-panel {
+  gap: 18px;
+}
+
+.account-create-form,
+.account-form {
+  display: grid;
+  gap: 14px;
+}
+
+.account-list {
+  display: grid;
+  gap: 12px;
+}
+
+.account-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  padding: 14px;
+}
+
+.account-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.role-pill {
+  width: max-content;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.role-pill-admin {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.role-pill-user {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
 @media (max-width: 920px) {
   .table-panel {
     padding: 18px;
@@ -462,6 +527,10 @@ td span {
   .workspace-side {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .account-management-panel {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 760px) {
@@ -482,11 +551,17 @@ td span {
   .metrics-grid,
   .workspace-side,
   .form-grid,
+  .inline-field-grid,
   .toolbar {
     grid-template-columns: 1fr;
   }
 
   .metric {
     min-height: 86px;
+  }
+
+  .account-head {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

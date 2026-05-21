@@ -15,7 +15,7 @@ Aplicacion web para registrar equipos con hardening, conservar las llaves de Bit
 - Administrador: `admin` / `admin123`
 - Usuario: `standard` / `standard123`
 
-El rol administrador puede crear equipos y ver/exportar la base en JSON. El rol usuario solo puede asignar usuarios a equipos existentes que no tengan usuario.
+Existe un solo administrador. Desde esa cuenta se pueden crear usuarios nuevos, cambiar usuario o contraseña de cualquier cuenta y administrar equipos. El rol usuario solo puede asignar usuarios a equipos existentes que no tengan usuario.
 
 ## Datos
 

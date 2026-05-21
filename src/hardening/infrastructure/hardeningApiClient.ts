@@ -3,7 +3,6 @@ import type {
   EquipmentFormData,
   HardeningDatabase,
 } from '../domain/hardening'
-import type { AuthSession } from '../../identity-access/domain/accessControl'
 
 const API_BASE_URL = '/api'
 
@@ -32,13 +31,6 @@ async function request<T>(
 }
 
 export class ApiHardeningRepository {
-  login(username: string, password: string) {
-    return request<AuthSession>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    })
-  }
-
   load(token: string) {
     return request<HardeningDatabase>('/hardening', {}, token)
   }

@@ -4,11 +4,16 @@ import type {
   EquipmentFormData,
   HardeningDatabase,
 } from '../domain/hardening'
-import type { Account } from '../../identity-access/domain/accessControl'
+import type {
+  Account,
+  CreateUserFormData,
+  UpdateAccountCredentialsFormData,
+} from '../../identity-access/domain/accessControl'
 import {
   filterEquipments,
   getHardeningMetrics,
 } from '../application/hardeningDashboard'
+import { AccountManagementPanel } from '../../identity-access/presentation/AccountManagementPanel'
 import { EquipmentForm } from './components/EquipmentForm'
 import { EquipmentTable } from './components/EquipmentTable'
 import { MetricCard } from './components/MetricCard'
@@ -16,18 +21,26 @@ import { UserAssignmentForm } from './components/UserAssignmentForm'
 
 interface DashboardScreenProps {
   account: Account
+  accounts: Account[]
   database: HardeningDatabase
   onAssignUser: (formData: AssignedUserFormData) => Promise<void>
   onCreateEquipment: (formData: EquipmentFormData) => Promise<void>
+  onCreateUser: (formData: CreateUserFormData) => Promise<void>
   onLogout: () => void
+  onUpdateAccountCredentials: (
+    formData: UpdateAccountCredentialsFormData,
+  ) => Promise<void>
 }
 
 export function DashboardScreen({
   account,
+  accounts,
   database,
   onAssignUser,
   onCreateEquipment,
+  onCreateUser,
   onLogout,
+  onUpdateAccountCredentials,
 }: DashboardScreenProps) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<'all' | 'hardened' | 'assigned'>('all')
@@ -74,7 +87,7 @@ export function DashboardScreen({
         </div>
 
         <div className="session-box">
-          <span>{account.displayName}</span>
+          <span>{account.username}</span>
           <strong>{isAdmin ? 'Administrador' : 'Usuario'}</strong>
           <button type="button" className="ghost-button" onClick={onLogout}>
             Salir
@@ -153,6 +166,15 @@ export function DashboardScreen({
               await onAssignUser(formData)
             }}
           />
+
+          {isAdmin && (
+            <AccountManagementPanel
+              accounts={accounts}
+              currentAccountId={account.id}
+              onCreateUser={onCreateUser}
+              onUpdateAccountCredentials={onUpdateAccountCredentials}
+            />
+          )}
         </aside>
       </section>
     </main>

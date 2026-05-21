@@ -5,7 +5,14 @@ import type {
   AssignedUserFormData,
   EquipmentFormData,
 } from '../../src/hardening/domain/hardening.js'
-import { HardeningSqliteDatabase } from '../hardening-sqlite/HardeningSqliteDatabase.js'
+import type {
+  CreateUserFormData,
+  UpdateAccountCredentialsFormData,
+} from '../../src/identity-access/domain/accessControl.js'
+import {
+  DatabaseOperationError,
+  HardeningSqliteDatabase,
+} from '../hardening-sqlite/HardeningSqliteDatabase.js'
 
 const port = Number(process.env.API_PORT ?? process.env.PORT ?? 3001)
 const publicDirectory = resolve(process.cwd(), 'dist')
@@ -57,7 +64,8 @@ const getBearerToken = (request: IncomingMessage) => {
 const withAccount =
   (handler: RouteHandler): RouteHandler =>
   async (request, response) => {
-    const account = database.authenticate(getBearerToken(request))
+    const token = getBearerToken(request)
+    const account = database.authenticate(token)
 
     if (!account) {
       sendJson(response, 401, { message: 'Sesion invalida o expirada.' })
@@ -65,6 +73,7 @@ const withAccount =
     }
 
     request.account = account
+    request.token = token
     await handler(request, response)
   }
 
@@ -97,6 +106,21 @@ const routes: Record<string, RouteHandler> = {
   'GET /api/hardening': withAccount((_request, response) => {
     sendJson(response, 200, database.getDatabase())
   }),
+  'GET /api/accounts': withAdmin((request, response) => {
+    sendJson(
+      response,
+      200,
+      database.getAccountDirectory(request.account!.id),
+    )
+  }),
+  'POST /api/accounts': withAdmin(async (request, response) => {
+    const body = await parseBody<CreateUserFormData>(request)
+    sendJson(
+      response,
+      201,
+      database.createUser(body, request.account!.id),
+    )
+  }),
   'POST /api/equipments': withAdmin(async (request, response) => {
     const body = await parseBody<EquipmentFormData>(request)
     sendJson(response, 201, database.createEquipment(body))
@@ -106,14 +130,28 @@ const routes: Record<string, RouteHandler> = {
       const body = await parseBody<AssignedUserFormData>(request)
       sendJson(response, 201, database.assignUser(body, request.account!))
     } catch (error) {
-      sendJson(response, 409, {
-        message:
-          error instanceof Error
-            ? error.message
-            : 'No se pudo asignar el usuario.',
-      })
+      sendRouteError(response, error)
     }
   }),
+}
+
+const accountCredentialPath = /^\/api\/accounts\/([^/]+)$/
+
+const sendRouteError = (
+  response: ServerResponse,
+  error: unknown,
+) => {
+  if (error instanceof DatabaseOperationError) {
+    sendJson(response, error.statusCode, { message: error.message })
+    return
+  }
+
+  sendJson(response, 500, {
+    message:
+      error instanceof Error
+        ? error.message
+        : 'Error interno del servidor.',
+  })
 }
 
 const serveStaticFile = (request: IncomingMessage, response: ServerResponse) => {
@@ -140,10 +178,42 @@ const server = createServer(async (request, response) => {
   const method = request.method ?? 'GET'
   const pathname = new URL(request.url ?? '/', 'http://localhost').pathname
   const route = routes[`${method} ${pathname}`]
+  const isAccountCredentialUpdate =
+    method === 'PATCH' && accountCredentialPath.test(pathname)
 
   try {
     if (route) {
       await route(request, response)
+      return
+    }
+
+    if (isAccountCredentialUpdate) {
+      await withAdmin(async (securedRequest, securedResponse) => {
+        const accountId = pathname.match(accountCredentialPath)?.[1]
+
+        if (!accountId) {
+          sendJson(securedResponse, 404, { message: 'Ruta no encontrada.' })
+          return
+        }
+
+        const body = await parseBody<Omit<UpdateAccountCredentialsFormData, 'accountId'>>(
+          securedRequest,
+        )
+
+        sendJson(
+          securedResponse,
+          200,
+          database.updateAccountCredentials(
+            {
+              accountId,
+              password: body.password ?? '',
+              username: body.username ?? '',
+            },
+            securedRequest.account!.id,
+            securedRequest.token!,
+          ),
+        )
+      })(request, response)
       return
     }
 
@@ -154,12 +224,7 @@ const server = createServer(async (request, response) => {
 
     serveStaticFile(request, response)
   } catch (error) {
-    sendJson(response, 500, {
-      message:
-        error instanceof Error
-          ? error.message
-      : 'Error interno del servidor.',
-    })
+    sendRouteError(response, error)
   }
 })
 
