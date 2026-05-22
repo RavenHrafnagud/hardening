@@ -32,6 +32,12 @@ interface DashboardScreenProps {
   ) => Promise<void>
 }
 
+/**
+ * `DashboardScreen` es la vista principal una vez iniciada la sesión.
+ * - Muestra métricas, lista de equipos y formularios para crear/assignar.
+ * - Recibe callbacks (`onAssignUser`, `onCreateEquipment`, ...) que
+ *   delegan las operaciones al backend.
+ */
 export function DashboardScreen({
   account,
   accounts,

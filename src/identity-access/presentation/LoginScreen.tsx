@@ -4,6 +4,11 @@ interface LoginScreenProps {
   onLogin: (username: string, password: string) => Promise<void>
 }
 
+/**
+ * Pantalla de login.
+ * - Muestra errores locales y errores devueltos por el backend.
+ * - Llama a `onLogin` con `username` y `password`.
+ */
 export function LoginScreen({ error, onLogin }: LoginScreenProps) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')

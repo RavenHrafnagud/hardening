@@ -20,6 +20,11 @@ const createInitialFormData = (
   notes: '',
 })
 
+/**
+ * Formulario para asignar un usuario a un equipo.
+ * - Si no hay equipos disponibles, el select aparece deshabilitado.
+ * - Normaliza la selección para evitar enviar equipmentId inválido.
+ */
 export function UserAssignmentForm({
   equipments,
   onSubmit,

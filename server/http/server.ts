@@ -1,6 +1,4 @@
-import { createReadStream, existsSync, statSync } from 'node:fs'
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { extname, join, resolve } from 'node:path'
+import { createServer } from 'node:http'
 import type {
   AssignedUserFormData,
   EquipmentFormData,
@@ -9,84 +7,14 @@ import type {
   CreateUserFormData,
   UpdateAccountCredentialsFormData,
 } from '../../src/identity-access/domain/accessControl.js'
-import {
-  DatabaseOperationError,
-  HardeningSqliteDatabase,
-} from '../hardening-sqlite/HardeningSqliteDatabase.js'
+import { HardeningSqliteDatabase } from '../hardening-sqlite/HardeningSqliteDatabase.js'
+import { parseBody } from './requestParser.js'
+import { serveStaticFile } from './staticFile.js'
+import { sendJson, sendRouteError } from './response.js'
+import { withAccount, withAdmin, type RouteHandler } from './auth.js'
 
 const port = Number(process.env.API_PORT ?? process.env.PORT ?? 3001)
-const publicDirectory = resolve(process.cwd(), 'dist')
 const database = new HardeningSqliteDatabase()
-
-type RouteHandler = (
-  request: IncomingMessage,
-  response: ServerResponse,
-) => Promise<void> | void
-
-const mimeTypes: Record<string, string> = {
-  '.css': 'text/css; charset=utf-8',
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-}
-
-const sendJson = (
-  response: ServerResponse,
-  statusCode: number,
-  payload: unknown,
-) => {
-  response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' })
-  response.end(JSON.stringify(payload))
-}
-
-const parseBody = async <T>(request: IncomingMessage): Promise<T> => {
-  const chunks: Buffer[] = []
-
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-  }
-
-  const rawBody = Buffer.concat(chunks).toString('utf8')
-  return rawBody ? (JSON.parse(rawBody) as T) : ({} as T)
-}
-
-const getBearerToken = (request: IncomingMessage) => {
-  const authorization = request.headers.authorization
-  if (!authorization?.startsWith('Bearer ')) {
-    return ''
-  }
-
-  return authorization.slice('Bearer '.length)
-}
-
-const withAccount =
-  (handler: RouteHandler): RouteHandler =>
-  async (request, response) => {
-    const token = getBearerToken(request)
-    const account = database.authenticate(token)
-
-    if (!account) {
-      sendJson(response, 401, { message: 'Sesion invalida o expirada.' })
-      return
-    }
-
-    request.account = account
-    request.token = token
-    await handler(request, response)
-  }
-
-const withAdmin =
-  (handler: RouteHandler): RouteHandler =>
-  withAccount(async (request, response) => {
-    if (request.account?.role !== 'admin') {
-      sendJson(response, 403, { message: 'Solo el administrador puede hacer esto.' })
-      return
-    }
-
-    await handler(request, response)
-  })
 
 const routes: Record<string, RouteHandler> = {
   'GET /api/health': (_request, response) => {
@@ -103,83 +31,33 @@ const routes: Record<string, RouteHandler> = {
 
     sendJson(response, 200, session)
   },
-  'GET /api/hardening': withAccount((_request, response) => {
+  'GET /api/hardening': withAccount(database, (_request, response) => {
     sendJson(response, 200, database.getDatabase())
   }),
-  'GET /api/accounts': withAdmin((request, response) => {
-    sendJson(
-      response,
-      200,
-      database.getAccountDirectory(request.account!.id),
-    )
+  'GET /api/accounts': withAdmin(database, (request, response) => {
+    sendJson(response, 200, database.getAccountDirectory(request.account!.id))
   }),
-  'POST /api/accounts': withAdmin(async (request, response) => {
+  'POST /api/accounts': withAdmin(database, async (request, response) => {
     const body = await parseBody<CreateUserFormData>(request)
-    sendJson(
-      response,
-      201,
-      database.createUser(body, request.account!.id),
-    )
+    sendJson(response, 201, database.createUser(body, request.account!.id))
   }),
-  'POST /api/equipments': withAdmin(async (request, response) => {
+  'POST /api/equipments': withAdmin(database, async (request, response) => {
     const body = await parseBody<EquipmentFormData>(request)
     sendJson(response, 201, database.createEquipment(body))
   }),
-  'POST /api/assignments': withAccount(async (request, response) => {
-    try {
-      const body = await parseBody<AssignedUserFormData>(request)
-      sendJson(response, 201, database.assignUser(body, request.account!))
-    } catch (error) {
-      sendRouteError(response, error)
-    }
+  'POST /api/assignments': withAccount(database, async (request, response) => {
+    const body = await parseBody<AssignedUserFormData>(request)
+    sendJson(response, 201, database.assignUser(body, request.account!))
   }),
 }
 
 const accountCredentialPath = /^\/api\/accounts\/([^/]+)$/
 
-const sendRouteError = (
-  response: ServerResponse,
-  error: unknown,
-) => {
-  if (error instanceof DatabaseOperationError) {
-    sendJson(response, error.statusCode, { message: error.message })
-    return
-  }
-
-  sendJson(response, 500, {
-    message:
-      error instanceof Error
-        ? error.message
-        : 'Error interno del servidor.',
-  })
-}
-
-const serveStaticFile = (request: IncomingMessage, response: ServerResponse) => {
-  const requestedPath = new URL(request.url ?? '/', 'http://localhost').pathname
-  const safePath = requestedPath === '/' ? '/index.html' : requestedPath
-  const filePath = join(publicDirectory, safePath)
-  const fallbackPath = join(publicDirectory, 'index.html')
-  const resolvedFile = existsSync(filePath) && statSync(filePath).isFile()
-    ? filePath
-    : fallbackPath
-
-  if (!existsSync(resolvedFile)) {
-    sendJson(response, 404, { message: 'Frontend no construido. Ejecuta yarn build.' })
-    return
-  }
-
-  response.writeHead(200, {
-    'Content-Type': mimeTypes[extname(resolvedFile)] ?? 'application/octet-stream',
-  })
-  createReadStream(resolvedFile).pipe(response)
-}
-
 const server = createServer(async (request, response) => {
   const method = request.method ?? 'GET'
   const pathname = new URL(request.url ?? '/', 'http://localhost').pathname
   const route = routes[`${method} ${pathname}`]
-  const isAccountCredentialUpdate =
-    method === 'PATCH' && accountCredentialPath.test(pathname)
+  const isAccountCredentialUpdate = method === 'PATCH' && accountCredentialPath.test(pathname)
 
   try {
     if (route) {
@@ -188,7 +66,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (isAccountCredentialUpdate) {
-      await withAdmin(async (securedRequest, securedResponse) => {
+      await withAdmin(database, async (securedRequest, securedResponse) => {
         const accountId = pathname.match(accountCredentialPath)?.[1]
 
         if (!accountId) {
@@ -196,9 +74,7 @@ const server = createServer(async (request, response) => {
           return
         }
 
-        const body = await parseBody<Omit<UpdateAccountCredentialsFormData, 'accountId'>>(
-          securedRequest,
-        )
+        const body = await parseBody<Omit<UpdateAccountCredentialsFormData, 'accountId'>>(securedRequest)
 
         sendJson(
           securedResponse,

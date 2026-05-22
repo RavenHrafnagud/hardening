@@ -115,6 +115,11 @@ function AccountRow({
   )
 }
 
+/**
+ * Panel de administración de cuentas (solo para el administrador).
+ * - Permite crear usuarios y actualizar credenciales de cualquier cuenta.
+ * - Muestra la lista de cuentas y un formulario por cada una para actualizar.
+ */
 export function AccountManagementPanel({
   accounts,
   currentAccountId,

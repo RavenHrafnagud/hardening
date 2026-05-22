@@ -15,6 +15,13 @@ import { DashboardScreen } from '../hardening/presentation/DashboardScreen'
 import { AccessControlApiClient } from '../identity-access/infrastructure/accessControlApiClient'
 import { LoginScreen } from '../identity-access/presentation/LoginScreen'
 
+/**
+ * Componente raíz de la aplicación.
+ * - Persiste la sesión en `sessionStorage`.
+ * - Coordina la carga de datos usando `ApiHardeningRepository` y
+ *   `AccessControlApiClient`.
+ * - Expone handlers que delegan llamadas al backend.
+ */
 const SESSION_KEY = 'credismart-hardening-session'
 
 const readStoredSession = () => {

@@ -3,6 +3,13 @@ import type {
   HardeningMetrics,
 } from '../domain/hardening'
 
+/**
+ * Calcula métricas simples sobre la lista de equipos.
+ * - `total`: número total de equipos
+ * - `assigned`: equipos con al menos un usuario asignado
+ * - `available`: equipos sin usuarios
+ * - `withBitlockerKey`: equipos que tienen llave registrada
+ */
 export function getHardeningMetrics(
   equipments: Equipment[],
 ): HardeningMetrics {
@@ -19,6 +26,10 @@ export function getHardeningMetrics(
   }
 }
 
+/**
+ * Filtra la lista de equipos por texto y estado.
+ * - `query` busca en campos principales y en el último usuario asignado.
+ */
 export function filterEquipments(
   equipments: Equipment[],
   query: string,

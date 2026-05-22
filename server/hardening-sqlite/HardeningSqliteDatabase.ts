@@ -107,6 +107,7 @@ export class DatabaseOperationError extends Error {
 
 export class HardeningSqliteDatabase {
   private readonly db: DatabaseSync
+  private readonly seed: SeedFile
 
   constructor() {
     if (!existsSync(dataDirectory)) {
@@ -115,6 +116,7 @@ export class HardeningSqliteDatabase {
 
     this.db = new DatabaseSync(databasePath)
     this.db.exec('PRAGMA foreign_keys = ON')
+    this.seed = readSeed()
     this.createSchema()
     this.seedIfNeeded()
   }
@@ -148,13 +150,12 @@ export class HardeningSqliteDatabase {
   authenticate(token: string) {
     const row = this.db
       .prepare(
-        `SELECT accounts.id, accounts.username, accounts.role, accounts.display_name,
-                accounts.password_hash, accounts.password_salt
+        `SELECT accounts.id, accounts.username, accounts.role, accounts.display_name
          FROM sessions
          INNER JOIN accounts ON accounts.id = sessions.account_id
          WHERE sessions.token = ? AND sessions.expires_at > ?`,
       )
-      .get(token, now()) as AccountRow | undefined
+      .get(token, now()) as AccountIdentityRow | undefined
 
     return row ? toAccount(row) : null
   }
@@ -167,60 +168,72 @@ export class HardeningSqliteDatabase {
   }
 
   getDatabase(): HardeningDatabase {
-    const seed = readSeed()
-    const equipmentRows = this.db
+    const rows = this.db
       .prepare(
-        `SELECT id, name, serial, asset_id, anydesk_id, bitlocker_key,
-                status, created_at, updated_at
-         FROM equipments
-         ORDER BY created_at DESC, name ASC`,
+        `SELECT
+           e.id AS equipment_id,
+           e.name AS equipment_name,
+           e.serial AS equipment_serial,
+           e.asset_id AS equipment_asset_id,
+           e.anydesk_id AS equipment_anydesk_id,
+           e.bitlocker_key AS equipment_bitlocker_key,
+           e.status AS equipment_status,
+           e.created_at AS equipment_created_at,
+           e.updated_at AS equipment_updated_at,
+           au.id AS user_id,
+           au.name AS user_name,
+           au.gmail AS user_gmail,
+           au.outlook AS user_outlook,
+           au.area AS user_area,
+           au.notes AS user_notes,
+           au.assigned_at AS user_assigned_at
+         FROM equipments e
+         LEFT JOIN assigned_users au ON au.equipment_id = e.id
+         ORDER BY e.created_at DESC, e.name ASC, au.assigned_at DESC`,
       )
-      .all() as unknown as EquipmentRow[]
+      .all() as Array<Record<string, string | null>>
 
-    const userRows = this.db
-      .prepare(
-        `SELECT id, equipment_id, name, gmail, outlook, area, assigned_at, notes
-         FROM assigned_users
-         ORDER BY assigned_at DESC`,
-      )
-      .all() as unknown as AssignedUserRow[]
+    const equipmentsById = new Map<string, Equipment>()
 
-    const usersByEquipment = userRows.reduce<Record<string, AssignedUser[]>>(
-      (collection, user) => {
-        collection[user.equipment_id] ??= []
-        collection[user.equipment_id].push({
-          id: user.id,
-          name: user.name,
-          gmail: user.gmail,
-          outlook: user.outlook,
-          area: user.area,
-          assignedAt: user.assigned_at,
-          notes: user.notes,
+    for (const row of rows) {
+      const equipmentId = String(row.equipment_id)
+      let equipment = equipmentsById.get(equipmentId)
+
+      if (!equipment) {
+        equipment = {
+          id: equipmentId,
+          name: String(row.equipment_name),
+          serial: String(row.equipment_serial),
+          assetId: String(row.equipment_asset_id),
+          anydeskId: String(row.equipment_anydesk_id),
+          bitlockerKey: String(row.equipment_bitlocker_key),
+          status: row.equipment_status as 'hardened' | 'assigned',
+          createdAt: String(row.equipment_created_at),
+          updatedAt: String(row.equipment_updated_at),
+          assignedUsers: [],
+        }
+
+        equipmentsById.set(equipmentId, equipment)
+      }
+
+      if (row.user_id) {
+        equipment.assignedUsers.push({
+          id: String(row.user_id),
+          name: String(row.user_name),
+          gmail: String(row.user_gmail),
+          outlook: String(row.user_outlook),
+          area: String(row.user_area),
+          assignedAt: String(row.user_assigned_at),
+          notes: String(row.user_notes),
         })
-
-        return collection
-      },
-      {},
-    )
-
-    const equipments: Equipment[] = equipmentRows.map((equipment) => ({
-      id: equipment.id,
-      name: equipment.name,
-      serial: equipment.serial,
-      assetId: equipment.asset_id,
-      anydeskId: equipment.anydesk_id,
-      bitlockerKey: equipment.bitlocker_key,
-      status: equipment.status,
-      createdAt: equipment.created_at,
-      updatedAt: equipment.updated_at,
-      assignedUsers: usersByEquipment[equipment.id] ?? [],
-    }))
+      }
+    }
 
     return {
-      version: seed.version,
-      importedAt: seed.importedAt,
-      source: `${seed.source} -> ${databasePath}`,
-      equipments,
+      version: this.seed.version,
+      importedAt: this.seed.importedAt,
+      source: `${this.seed.source} -> ${databasePath}`,
+      equipments: Array.from(equipmentsById.values()),
     }
   }
 
@@ -517,7 +530,7 @@ export class HardeningSqliteDatabase {
       return
     }
 
-    const seed = readSeed()
+    const seed = this.seed
     const adminPassword = hashPassword('admin123')
     const userPassword = hashPassword('standard123')
 

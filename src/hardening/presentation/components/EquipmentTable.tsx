@@ -12,6 +12,11 @@ const formatDate = (value: string) =>
     timeStyle: 'short',
   }).format(new Date(value))
 
+/**
+ * Tabla que muestra los equipos registrados.
+ * - Muestra información principal y el último usuario asignado.
+ * - Oculta la llave BitLocker para usuarios no administradores.
+ */
 export function EquipmentTable({ equipments, role }: EquipmentTableProps) {
   return (
     <section className="panel table-panel">

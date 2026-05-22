@@ -13,6 +13,11 @@ const initialFormData: EquipmentFormData = {
   bitlockerKey: '',
 }
 
+/**
+ * Formulario para crear un nuevo equipo.
+ * - Valida campos requeridos en HTML (`required`).
+ * - Resetea el formulario tras el submit exitoso.
+ */
 export function EquipmentForm({ onSubmit }: EquipmentFormProps) {
   const [formData, setFormData] = useState(initialFormData)
 
