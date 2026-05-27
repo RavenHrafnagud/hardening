@@ -15,7 +15,7 @@ La aplicacion tiene frontend React, backend Node.js y base de datos SQLite local
 - Administrador: `admin` / `admin123`
 - Usuario: `standard` / `standard123`
 
-Existe un solo rol administrador. El administrador puede crear usuarios, cambiar credenciales, crear/editar equipos y ver llaves BitLocker. Los usuarios pueden asignar usuarios a equipos disponibles y editar datos de asignaciones.
+Existe un solo rol administrador. El administrador puede crear usuarios, cambiar credenciales, crear/editar equipos, ver llaves BitLocker y exportar la base en JSON o Excel. Los usuarios pueden asignar usuarios a equipos disponibles y editar datos de asignaciones.
 
 ## Estructura
 

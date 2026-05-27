@@ -15,6 +15,7 @@ import {
   filterEquipments,
   getHardeningMetrics,
 } from '../application/hardeningDashboard'
+import { createHardeningExcelExport } from '../application/exportHardeningSpreadsheet'
 import { AccountManagementPanel } from '../../identity-access/presentation/AccountManagementPanel'
 import { EditAssignedUserForm } from './components/EditAssignedUserForm'
 import { EditEquipmentForm } from './components/EditEquipmentForm'
@@ -104,14 +105,27 @@ export function DashboardScreen({
   }
 
   const exportDatabase = () => {
-    const blob = new Blob([JSON.stringify(database, null, 2)], {
-      type: 'application/json',
-    })
+    downloadFile(
+      JSON.stringify(database, null, 2),
+      'application/json',
+      'credismart-hardening-db.json',
+    )
+  }
+
+  const exportExcel = () => {
+    const file = createHardeningExcelExport(database)
+    downloadFile(file.content, file.mimeType, file.filename)
+  }
+
+  const downloadFile = (content: string, mimeType: string, filename: string) => {
+    const blob = new Blob([content], { type: mimeType })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = 'credismart-hardening-db.json'
+    link.download = filename
+    document.body.append(link)
     link.click()
+    link.remove()
     URL.revokeObjectURL(url)
   }
 
@@ -170,9 +184,14 @@ export function DashboardScreen({
             </label>
 
             {isAdmin && (
-              <button type="button" className="ghost-button" onClick={exportDatabase}>
-                Exportar JSON
-              </button>
+              <div className="toolbar-actions">
+                <button type="button" onClick={exportExcel}>
+                  Exportar Excel
+                </button>
+                <button type="button" className="ghost-button" onClick={exportDatabase}>
+                  JSON
+                </button>
+              </div>
             )}
           </section>
 
