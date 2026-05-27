@@ -1,6 +1,9 @@
 import type { ServerResponse } from 'node:http'
 import { DatabaseOperationError } from '../hardening-sqlite/HardeningSqliteDatabase.js'
-import { RequestBodyTooLargeError } from './requestParser.js'
+import {
+  RequestBodyParseError,
+  RequestBodyTooLargeError,
+} from './requestParser.js'
 
 export const sendJson = (
   response: ServerResponse,
@@ -25,10 +28,13 @@ export const sendRouteError = (
     return
   }
 
+  if (error instanceof RequestBodyParseError) {
+    sendJson(response, 400, { message: error.message })
+    return
+  }
+
+  console.error(error)
   sendJson(response, 500, {
-    message:
-      error instanceof Error
-        ? error.message
-        : 'Error interno del servidor.',
+    message: 'Error interno del servidor.',
   })
 }

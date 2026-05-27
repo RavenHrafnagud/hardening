@@ -38,8 +38,21 @@ export interface EquipmentFormData {
   bitlockerKey: string
 }
 
+export interface EquipmentUpdateFormData extends EquipmentFormData {
+  equipmentId: string
+}
+
 export interface AssignedUserFormData {
   equipmentId: string
+  name: string
+  gmail: string
+  outlook: string
+  area: string
+  notes: string
+}
+
+export interface AssignedUserUpdateFormData {
+  id: string
   name: string
   gmail: string
   outlook: string

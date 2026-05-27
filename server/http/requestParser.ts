@@ -7,6 +7,13 @@ export class RequestBodyTooLargeError extends Error {
   }
 }
 
+export class RequestBodyParseError extends Error {
+  constructor() {
+    super('El cuerpo de la peticion no es un JSON valido.')
+    this.name = 'RequestBodyParseError'
+  }
+}
+
 const MAX_BODY_SIZE = 1024 * 1024
 
 export const parseBody = async <T>(request: IncomingMessage): Promise<T> => {
@@ -25,5 +32,14 @@ export const parseBody = async <T>(request: IncomingMessage): Promise<T> => {
   }
 
   const rawBody = Buffer.concat(chunks).toString('utf8')
-  return rawBody ? (JSON.parse(rawBody) as T) : ({} as T)
+
+  if (!rawBody) {
+    return {} as T
+  }
+
+  try {
+    return JSON.parse(rawBody) as T
+  } catch {
+    throw new RequestBodyParseError()
+  }
 }

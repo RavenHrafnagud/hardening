@@ -1,9 +1,11 @@
 import type { UserRole } from '../../../identity-access/domain/accessControl'
-import type { Equipment } from '../../domain/hardening'
+import type { AssignedUser, Equipment } from '../../domain/hardening'
 
 interface EquipmentTableProps {
   equipments: Equipment[]
   role: UserRole
+  onEditEquipment: (equipment: Equipment) => void
+  onEditAssignedUser: (assignedUser: AssignedUser) => void
 }
 
 const formatDate = (value: string) =>
@@ -17,7 +19,7 @@ const formatDate = (value: string) =>
  * - Muestra información principal y el último usuario asignado.
  * - Oculta la llave BitLocker para usuarios no administradores.
  */
-export function EquipmentTable({ equipments, role }: EquipmentTableProps) {
+export function EquipmentTable({ equipments, role, onEditEquipment, onEditAssignedUser }: EquipmentTableProps) {
   return (
     <section className="panel table-panel">
       <div className="panel-heading">
@@ -35,6 +37,7 @@ export function EquipmentTable({ equipments, role }: EquipmentTableProps) {
               <th>Usuario</th>
               <th>Estado</th>
               {role === 'admin' && <th>BitLocker</th>}
+              <th>Acciones</th>
               <th>Actualizado</th>
             </tr>
           </thead>
@@ -79,6 +82,26 @@ export function EquipmentTable({ equipments, role }: EquipmentTableProps) {
                       )}
                     </td>
                   )}
+                  <td data-label="Acciones">
+                    {role === 'admin' && (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => onEditEquipment(equipment)}
+                      >
+                        Editar equipo
+                      </button>
+                    )}
+                    {latestUser && (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => onEditAssignedUser(latestUser)}
+                      >
+                        Editar usuario
+                      </button>
+                    )}
+                  </td>
                   <td data-label="Actualizado">{formatDate(equipment.updatedAt)}</td>
                 </tr>
               )

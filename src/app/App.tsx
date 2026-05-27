@@ -149,12 +149,36 @@ function App() {
     setDatabase(await hardeningRepository.createEquipment(token, formData))
   }
 
+  const handleUpdateEquipment = async (
+    equipmentId: string,
+    formData: EquipmentFormData,
+  ) => {
+    if (!token) {
+      return
+    }
+
+    setDatabase(await hardeningRepository.updateEquipment(token, equipmentId, formData))
+  }
+
   const handleAssignUser = async (formData: AssignedUserFormData) => {
     if (!token) {
       return
     }
 
     setDatabase(await hardeningRepository.assignUser(token, formData))
+  }
+
+  const handleUpdateAssignedUser = async (
+    assignmentId: string,
+    formData: Omit<AssignedUserFormData, 'equipmentId'>,
+  ) => {
+    if (!token) {
+      return
+    }
+
+    setDatabase(
+      await hardeningRepository.updateAssignedUser(token, assignmentId, formData),
+    )
   }
 
   const handleCreateUser = async (formData: CreateUserFormData) => {
@@ -206,7 +230,9 @@ function App() {
       database={database}
       onAssignUser={handleAssignUser}
       onCreateEquipment={handleCreateEquipment}
+      onUpdateEquipment={handleUpdateEquipment}
       onCreateUser={handleCreateUser}
+      onUpdateAssignedUser={handleUpdateAssignedUser}
       onLogout={handleLogout}
       onUpdateAccountCredentials={handleUpdateAccountCredentials}
     />

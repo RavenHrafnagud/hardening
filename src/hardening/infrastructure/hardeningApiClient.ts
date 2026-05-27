@@ -3,40 +3,15 @@ import type {
   EquipmentFormData,
   HardeningDatabase,
 } from '../domain/hardening'
-
-const API_BASE_URL = '/api'
-
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-  token?: string,
-): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  })
-
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as
-      | { message?: string }
-      | null
-    throw new Error(body?.message ?? 'No se pudo completar la solicitud.')
-  }
-
-  return response.json() as Promise<T>
-}
+import { apiRequest } from '../../shared/infrastructure/httpClient'
 
 export class ApiHardeningRepository {
   load(token: string) {
-    return request<HardeningDatabase>('/hardening', {}, token)
+    return apiRequest<HardeningDatabase>('/hardening', {}, token)
   }
 
   createEquipment(token: string, formData: EquipmentFormData) {
-    return request<HardeningDatabase>(
+    return apiRequest<HardeningDatabase>(
       '/equipments',
       {
         method: 'POST',
@@ -47,10 +22,40 @@ export class ApiHardeningRepository {
   }
 
   assignUser(token: string, formData: AssignedUserFormData) {
-    return request<HardeningDatabase>(
+    return apiRequest<HardeningDatabase>(
       '/assignments',
       {
         method: 'POST',
+        body: JSON.stringify(formData),
+      },
+      token,
+    )
+  }
+
+  updateEquipment(
+    token: string,
+    equipmentId: string,
+    formData: EquipmentFormData,
+  ) {
+    return apiRequest<HardeningDatabase>(
+      `/equipments/${equipmentId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(formData),
+      },
+      token,
+    )
+  }
+
+  updateAssignedUser(
+    token: string,
+    assignmentId: string,
+    formData: Omit<AssignedUserFormData, 'equipmentId'>,
+  ) {
+    return apiRequest<HardeningDatabase>(
+      `/assignments/${assignmentId}`,
+      {
+        method: 'PATCH',
         body: JSON.stringify(formData),
       },
       token,

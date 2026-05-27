@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import type {
+  AssignedUser,
   AssignedUserFormData,
+  Equipment,
   EquipmentFormData,
   HardeningDatabase,
 } from '../domain/hardening'
@@ -14,6 +16,8 @@ import {
   getHardeningMetrics,
 } from '../application/hardeningDashboard'
 import { AccountManagementPanel } from '../../identity-access/presentation/AccountManagementPanel'
+import { EditAssignedUserForm } from './components/EditAssignedUserForm'
+import { EditEquipmentForm } from './components/EditEquipmentForm'
 import { EquipmentForm } from './components/EquipmentForm'
 import { EquipmentTable } from './components/EquipmentTable'
 import { MetricCard } from './components/MetricCard'
@@ -25,7 +29,15 @@ interface DashboardScreenProps {
   database: HardeningDatabase
   onAssignUser: (formData: AssignedUserFormData) => Promise<void>
   onCreateEquipment: (formData: EquipmentFormData) => Promise<void>
+  onUpdateEquipment: (
+    equipmentId: string,
+    formData: EquipmentFormData,
+  ) => Promise<void>
   onCreateUser: (formData: CreateUserFormData) => Promise<void>
+  onUpdateAssignedUser: (
+    assignmentId: string,
+    formData: Omit<AssignedUserFormData, 'equipmentId'>,
+  ) => Promise<void>
   onLogout: () => void
   onUpdateAccountCredentials: (
     formData: UpdateAccountCredentialsFormData,
@@ -34,7 +46,7 @@ interface DashboardScreenProps {
 
 /**
  * `DashboardScreen` es la vista principal una vez iniciada la sesión.
- * - Muestra métricas, lista de equipos y formularios para crear/assignar.
+ * - Muestra métricas, lista de equipos y formularios para crear/asignar.
  * - Recibe callbacks (`onAssignUser`, `onCreateEquipment`, ...) que
  *   delegan las operaciones al backend.
  */
@@ -44,12 +56,16 @@ export function DashboardScreen({
   database,
   onAssignUser,
   onCreateEquipment,
+  onUpdateEquipment,
   onCreateUser,
+  onUpdateAssignedUser,
   onLogout,
   onUpdateAccountCredentials,
 }: DashboardScreenProps) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<'all' | 'hardened' | 'assigned'>('all')
+  const [editingEquipment, setEditingEquipment] = useState<Equipment | null>(null)
+  const [editingAssignedUser, setEditingAssignedUser] = useState<AssignedUser | null>(null)
   const isAdmin = account.role === 'admin'
 
   const metrics = useMemo(
@@ -71,6 +87,21 @@ export function DashboardScreen({
       (equipment) => equipment.assignedUsers.length === 0,
     )
   }, [database.equipments, isAdmin])
+
+  const startEditEquipment = (equipment: Equipment) => {
+    setEditingEquipment(equipment)
+    setEditingAssignedUser(null)
+  }
+
+  const startEditAssignedUser = (assignedUser: AssignedUser) => {
+    setEditingAssignedUser(assignedUser)
+    setEditingEquipment(null)
+  }
+
+  const cancelEdit = () => {
+    setEditingEquipment(null)
+    setEditingAssignedUser(null)
+  }
 
   const exportDatabase = () => {
     const blob = new Blob([JSON.stringify(database, null, 2)], {
@@ -145,11 +176,38 @@ export function DashboardScreen({
             )}
           </section>
 
-          <EquipmentTable equipments={visibleEquipments} role={account.role} />
+          <EquipmentTable
+            equipments={visibleEquipments}
+            role={account.role}
+            onEditEquipment={startEditEquipment}
+            onEditAssignedUser={startEditAssignedUser}
+          />
         </div>
 
         <aside className="workspace-side">
-          {isAdmin && (
+          {editingEquipment && isAdmin && (
+            <EditEquipmentForm
+              equipment={editingEquipment}
+              onSubmit={async (data) => {
+                await onUpdateEquipment(editingEquipment.id, data)
+                cancelEdit()
+              }}
+              onCancel={cancelEdit}
+            />
+          )}
+
+          {editingAssignedUser && (
+            <EditAssignedUserForm
+              assignedUser={editingAssignedUser}
+              onSubmit={async (data) => {
+                await onUpdateAssignedUser(editingAssignedUser.id, data)
+                cancelEdit()
+              }}
+              onCancel={cancelEdit}
+            />
+          )}
+
+          {isAdmin && !editingEquipment && (
             <EquipmentForm
               onSubmit={onCreateEquipment}
             />
@@ -173,7 +231,7 @@ export function DashboardScreen({
             }}
           />
 
-          {isAdmin && (
+          {isAdmin && !editingEquipment && (
             <AccountManagementPanel
               accounts={accounts}
               currentAccountId={account.id}

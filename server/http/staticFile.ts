@@ -1,5 +1,5 @@
 import { createReadStream, existsSync, statSync } from 'node:fs'
-import { extname, join, resolve } from 'node:path'
+import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { sendJson } from './response.js'
 
@@ -27,11 +27,27 @@ const getCacheControlHeader = (filePath: string) => {
 export const serveStaticFile = (request: IncomingMessage, response: ServerResponse) => {
   const requestedPath = new URL(request.url ?? '/', 'http://localhost').pathname
   const safePath = requestedPath === '/' ? '/index.html' : requestedPath
-  const filePath = join(publicDirectory, safePath)
+  const filePath = resolve(publicDirectory, `.${safePath}`)
   const fallbackPath = join(publicDirectory, 'index.html')
-  const resolvedFile = existsSync(filePath) && statSync(filePath).isFile()
-    ? filePath
-    : fallbackPath
+  const relativeFilePath = relative(publicDirectory, filePath)
+  const isInsidePublicDirectory =
+    relativeFilePath &&
+    !relativeFilePath.startsWith('..') &&
+    !isAbsolute(relativeFilePath)
+
+  if (!isInsidePublicDirectory) {
+    sendJson(response, 403, { message: 'Acceso no permitido.' })
+    return
+  }
+
+  const requestedFileExists = existsSync(filePath) && statSync(filePath).isFile()
+  const isAssetRequest = Boolean(extname(requestedPath))
+  const resolvedFile = requestedFileExists ? filePath : fallbackPath
+
+  if (!requestedFileExists && isAssetRequest) {
+    sendJson(response, 404, { message: 'Archivo no encontrado.' })
+    return
+  }
 
   if (!existsSync(resolvedFile)) {
     sendJson(response, 404, { message: 'Frontend no construido. Ejecuta yarn build.' })

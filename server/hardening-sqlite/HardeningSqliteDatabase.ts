@@ -3,10 +3,11 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type {
-  AssignedUser,
   AssignedUserFormData,
+  AssignedUserUpdateFormData,
   Equipment,
   EquipmentFormData,
+  EquipmentUpdateFormData,
   HardeningDatabase,
 } from '../../src/hardening/domain/hardening.js'
 import type {
@@ -64,6 +65,7 @@ const seedPath = resolve(
   process.cwd(),
   'src/hardening/seed/hardeningSeed.json',
 )
+const SESSION_CLEANUP_INTERVAL_MS = 60_000
 
 const createId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`
@@ -74,6 +76,18 @@ const readSeed = () =>
   JSON.parse(readFileSync(seedPath, 'utf8')) as SeedFile
 
 const normalizeUsername = (username: string) => username.trim().toLowerCase()
+
+const requireText = (value: string | undefined, message: string) => {
+  const trimmedValue = value?.trim() ?? ''
+
+  if (!trimmedValue) {
+    throw new DatabaseOperationError(message, 400)
+  }
+
+  return trimmedValue
+}
+
+const optionalText = (value: string | undefined) => value?.trim() ?? ''
 
 const hashPassword = (password: string, salt = randomBytes(16).toString('hex')) => {
   const hash = pbkdf2Sync(password, salt, 120_000, 64, 'sha512').toString('hex')
@@ -108,6 +122,7 @@ export class DatabaseOperationError extends Error {
 export class HardeningSqliteDatabase {
   private readonly db: DatabaseSync
   private readonly seed: SeedFile
+  private lastSessionCleanupAt = 0
 
   constructor() {
     if (!existsSync(dataDirectory)) {
@@ -122,6 +137,8 @@ export class HardeningSqliteDatabase {
   }
 
   login(username: string, password: string) {
+    this.cleanupExpiredSessions()
+
     const account = this.db
       .prepare(
         `SELECT id, username, role, display_name, password_hash, password_salt
@@ -148,6 +165,8 @@ export class HardeningSqliteDatabase {
   }
 
   authenticate(token: string) {
+    this.cleanupExpiredSessions()
+
     const row = this.db
       .prepare(
         `SELECT accounts.id, accounts.username, accounts.role, accounts.display_name
@@ -232,23 +251,18 @@ export class HardeningSqliteDatabase {
     return {
       version: this.seed.version,
       importedAt: this.seed.importedAt,
-      source: `${this.seed.source} -> ${databasePath}`,
+      source: this.seed.source,
       equipments: Array.from(equipmentsById.values()),
     }
   }
 
   createUser(formData: CreateUserFormData, currentAccountId: string) {
-    const username = normalizeUsername(formData.username)
+    const username = normalizeUsername(
+      requireText(formData.username, 'El nombre de usuario es obligatorio.'),
+    )
+    const password = requireText(formData.password, 'La contraseña es obligatoria.')
 
-    if (!username) {
-      throw new DatabaseOperationError('El nombre de usuario es obligatorio.', 400)
-    }
-
-    if (!formData.password) {
-      throw new DatabaseOperationError('La contraseña es obligatoria.', 400)
-    }
-
-    const credentials = hashPassword(formData.password)
+    const credentials = hashPassword(password)
 
     try {
       this.db
@@ -331,33 +345,48 @@ export class HardeningSqliteDatabase {
 
   createEquipment(formData: EquipmentFormData) {
     const timestamp = now()
+    const name = requireText(formData.name, 'El nombre del equipo es obligatorio.')
+    const serial = requireText(formData.serial, 'El serial del equipo es obligatorio.')
+    const anydeskId = requireText(formData.anydeskId, 'El ID de AnyDesk es obligatorio.')
+    const bitlockerKey = requireText(formData.bitlockerKey, 'La llave BitLocker es obligatoria.')
 
-    this.db
-      .prepare(
-        `INSERT INTO equipments (
-          id, name, serial, asset_id, anydesk_id, bitlocker_key,
-          status, created_at, updated_at
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO equipments (
+            id, name, serial, asset_id, anydesk_id, bitlocker_key,
+            status, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, 'hardened', ?, ?)`,
         )
-        VALUES (?, ?, ?, ?, ?, ?, 'hardened', ?, ?)`,
-      )
-      .run(
-        createId('eq'),
-        formData.name.trim(),
-        formData.serial.trim(),
-        formData.assetId.trim(),
-        formData.anydeskId.trim(),
-        formData.bitlockerKey.trim(),
-        timestamp,
-        timestamp,
-      )
+        .run(
+          createId('eq'),
+          name,
+          serial,
+          optionalText(formData.assetId),
+          anydeskId,
+          bitlockerKey,
+          timestamp,
+          timestamp,
+        )
+    } catch (error) {
+      throw this.toOperationError(error)
+    }
 
     return this.getDatabase()
   }
 
   assignUser(formData: AssignedUserFormData, account: Account) {
+    const equipmentId = requireText(formData.equipmentId, 'El equipo es obligatorio.')
+    const name = requireText(formData.name, 'El nombre del usuario es obligatorio.')
+
+    if (!this.findEquipmentById(equipmentId)) {
+      throw new DatabaseOperationError('El equipo no existe.', 404)
+    }
+
     const existingUsers = this.db
       .prepare('SELECT COUNT(*) AS total FROM assigned_users WHERE equipment_id = ?')
-      .get(formData.equipmentId) as { total: number } | undefined
+      .get(equipmentId) as { total: number } | undefined
 
     if (account.role === 'standard' && existingUsers?.total) {
       throw new DatabaseOperationError(
@@ -379,12 +408,12 @@ export class HardeningSqliteDatabase {
         )
         .run(
           createId('user'),
-          formData.equipmentId,
-          formData.name.trim(),
-          formData.gmail.trim(),
-          formData.outlook.trim(),
-          formData.area.trim(),
-          formData.notes.trim(),
+          equipmentId,
+          name,
+          optionalText(formData.gmail),
+          optionalText(formData.outlook),
+          optionalText(formData.area),
+          optionalText(formData.notes),
           timestamp,
         )
 
@@ -394,12 +423,92 @@ export class HardeningSqliteDatabase {
            SET status = 'assigned', updated_at = ?
            WHERE id = ?`,
         )
-        .run(timestamp, formData.equipmentId)
+        .run(timestamp, equipmentId)
 
       this.db.exec('COMMIT')
     } catch (error) {
       this.db.exec('ROLLBACK')
-      throw error
+      throw this.toOperationError(error)
+    }
+
+    return this.getDatabase()
+  }
+
+  updateEquipment(formData: EquipmentUpdateFormData) {
+    const existingEquipment = this.findEquipmentById(formData.equipmentId)
+    const name = requireText(formData.name, 'El nombre del equipo es obligatorio.')
+    const serial = requireText(formData.serial, 'El serial del equipo es obligatorio.')
+    const anydeskId = requireText(formData.anydeskId, 'El ID de AnyDesk es obligatorio.')
+    const bitlockerKey = requireText(formData.bitlockerKey, 'La llave BitLocker es obligatoria.')
+
+    if (!existingEquipment) {
+      throw new DatabaseOperationError('El equipo no existe.', 404)
+    }
+
+    const timestamp = now()
+
+    try {
+      this.db
+        .prepare(
+          `UPDATE equipments
+           SET name = ?, serial = ?, asset_id = ?, anydesk_id = ?, bitlocker_key = ?, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(
+          name,
+          serial,
+          optionalText(formData.assetId),
+          anydeskId,
+          bitlockerKey,
+          timestamp,
+          formData.equipmentId,
+        )
+    } catch (error) {
+      throw this.toOperationError(error)
+    }
+
+    return this.getDatabase()
+  }
+
+  updateAssignedUser(formData: AssignedUserUpdateFormData) {
+    const existingUser = this.findAssignedUserById(formData.id)
+    const name = requireText(formData.name, 'El nombre del usuario es obligatorio.')
+
+    if (!existingUser) {
+      throw new DatabaseOperationError('El usuario asignado no existe.', 404)
+    }
+
+    const timestamp = now()
+
+    this.db.exec('BEGIN')
+    try {
+      this.db
+        .prepare(
+          `UPDATE assigned_users
+           SET name = ?, gmail = ?, outlook = ?, area = ?, notes = ?
+           WHERE id = ?`,
+        )
+        .run(
+          name,
+          optionalText(formData.gmail),
+          optionalText(formData.outlook),
+          optionalText(formData.area),
+          optionalText(formData.notes),
+          formData.id,
+        )
+
+      this.db
+        .prepare(
+          `UPDATE equipments
+           SET updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(timestamp, existingUser.equipment_id)
+
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw this.toOperationError(error)
     }
 
     return this.getDatabase()
@@ -447,6 +556,39 @@ export class HardeningSqliteDatabase {
       .get(accountId) as AccountRow | undefined
   }
 
+  private findEquipmentById(equipmentId: string) {
+    return this.db
+      .prepare(
+        `SELECT id, name, serial, asset_id, anydesk_id, bitlocker_key, status, created_at, updated_at
+         FROM equipments
+         WHERE id = ?`,
+      )
+      .get(equipmentId) as EquipmentRow | undefined
+  }
+
+  private findAssignedUserById(userId: string) {
+    return this.db
+      .prepare(
+        `SELECT id, equipment_id, name, gmail, outlook, area, notes, assigned_at
+         FROM assigned_users
+         WHERE id = ?`,
+      )
+      .get(userId) as AssignedUserRow | undefined
+  }
+
+  private cleanupExpiredSessions() {
+    const currentTime = Date.now()
+
+    if (currentTime - this.lastSessionCleanupAt < SESSION_CLEANUP_INTERVAL_MS) {
+      return
+    }
+
+    this.db
+      .prepare('DELETE FROM sessions WHERE expires_at <= ?')
+      .run(now())
+    this.lastSessionCleanupAt = currentTime
+  }
+
   private toOperationError(error: unknown) {
     if (
       error instanceof Error &&
@@ -456,6 +598,13 @@ export class HardeningSqliteDatabase {
         'Ese nombre de usuario ya existe.',
         409,
       )
+    }
+
+    if (
+      error instanceof Error &&
+      error.message.includes('FOREIGN KEY constraint failed')
+    ) {
+      return new DatabaseOperationError('El registro relacionado no existe.', 404)
     }
 
     if (error instanceof DatabaseOperationError) {
@@ -492,6 +641,13 @@ export class HardeningSqliteDatabase {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         expires_at TEXT NOT NULL
       );
+
+      CREATE INDEX IF NOT EXISTS idx_sessions_expires_at
+        ON sessions(expires_at);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_single_admin
+        ON accounts(role)
+        WHERE role = 'admin';
 
       CREATE TABLE IF NOT EXISTS equipments (
         id TEXT PRIMARY KEY,

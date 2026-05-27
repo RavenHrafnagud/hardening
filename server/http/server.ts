@@ -1,7 +1,9 @@
 import { createServer } from 'node:http'
 import type {
   AssignedUserFormData,
+  AssignedUserUpdateFormData,
   EquipmentFormData,
+  EquipmentUpdateFormData,
 } from '../../src/hardening/domain/hardening.js'
 import type {
   CreateUserFormData,
@@ -18,7 +20,7 @@ const database = new HardeningSqliteDatabase()
 
 const routes: Record<string, RouteHandler> = {
   'GET /api/health': (_request, response) => {
-    sendJson(response, 200, { ok: true, database: database.path })
+    sendJson(response, 200, { ok: true, storage: 'sqlite' })
   },
   'POST /api/auth/login': async (request, response) => {
     const body = await parseBody<{ username?: string; password?: string }>(request)
@@ -52,12 +54,16 @@ const routes: Record<string, RouteHandler> = {
 }
 
 const accountCredentialPath = /^\/api\/accounts\/([^/]+)$/
+const equipmentUpdatePath = /^\/api\/equipments\/([^/]+)$/
+const assignmentUpdatePath = /^\/api\/assignments\/([^/]+)$/
 
 const server = createServer(async (request, response) => {
   const method = request.method ?? 'GET'
   const pathname = new URL(request.url ?? '/', 'http://localhost').pathname
   const route = routes[`${method} ${pathname}`]
   const isAccountCredentialUpdate = method === 'PATCH' && accountCredentialPath.test(pathname)
+  const isEquipmentUpdate = method === 'PATCH' && equipmentUpdatePath.test(pathname)
+  const isAssignmentUpdate = method === 'PATCH' && assignmentUpdatePath.test(pathname)
 
   try {
     if (route) {
@@ -87,6 +93,64 @@ const server = createServer(async (request, response) => {
             },
             securedRequest.account!.id,
             securedRequest.token!,
+          ),
+        )
+      })(request, response)
+      return
+    }
+
+    if (isEquipmentUpdate) {
+      await withAdmin(database, async (securedRequest, securedResponse) => {
+        const equipmentId = pathname.match(equipmentUpdatePath)?.[1]
+
+        if (!equipmentId) {
+          sendJson(securedResponse, 404, { message: 'Ruta no encontrada.' })
+          return
+        }
+
+        const body = await parseBody<Omit<EquipmentUpdateFormData, 'equipmentId'>>(securedRequest)
+
+        sendJson(
+          securedResponse,
+          200,
+          database.updateEquipment(
+            {
+              equipmentId,
+              name: body.name ?? '',
+              serial: body.serial ?? '',
+              assetId: body.assetId ?? '',
+              anydeskId: body.anydeskId ?? '',
+              bitlockerKey: body.bitlockerKey ?? '',
+            },
+          ),
+        )
+      })(request, response)
+      return
+    }
+
+    if (isAssignmentUpdate) {
+      await withAccount(database, async (securedRequest, securedResponse) => {
+        const assignmentId = pathname.match(assignmentUpdatePath)?.[1]
+
+        if (!assignmentId) {
+          sendJson(securedResponse, 404, { message: 'Ruta no encontrada.' })
+          return
+        }
+
+        const body = await parseBody<Omit<AssignedUserUpdateFormData, 'id'>>(securedRequest)
+
+        sendJson(
+          securedResponse,
+          200,
+          database.updateAssignedUser(
+            {
+              id: assignmentId,
+              name: body.name ?? '',
+              gmail: body.gmail ?? '',
+              outlook: body.outlook ?? '',
+              area: body.area ?? '',
+              notes: body.notes ?? '',
+            },
           ),
         )
       })(request, response)
